@@ -3,9 +3,10 @@ import { openKeypad, FREQ_UNITS, freqAuto } from './keypad.js';
 import { BB_FILTER_BW, HackRf, HACKRF_FILTERS, isHackRf, isMayhemSerial, MAYHEM_SERIAL_FILTER } from './hackrf.js';
 import { RTL_MAX_GAIN_DB, RTLSDR_FILTERS, RTLSDR_READY, RtlSdr, isRtlSdr } from './rtlsdr.js';
 import { APP_NEEDS, RATE_CHOICES, blockedBecause, canSample, canTune, cleanWidest, nearestRate, whyNot, type Radio } from './radio.js';
-import type { DmrStatus } from './dsp/ham/dmr.js';
 import type { P25Status } from './dsp/ham/p25.js';
+import { RemoteHackRF } from './remoteradio.js';
 import { lookupCall, offlineInfo, latLonToGrid, gridToLatLon, distanceBearing, toAdif, fromAdif, bandOfHz, parseCall, type Qso, type CallInfo } from './callsign.js';
+import type { DmrStatus } from './dsp/ham/dmr.js';
 import { SKINS, applySkin, currentSkin, loadSkin } from './theme.js';
 import { glyph } from './glyphs.js';
 import { Scope, WF_ICON, centredLabels, rangeLabels, rowToSpec } from './scope.js';
@@ -8772,6 +8773,18 @@ function renderSettings(view: HTMLElement): void {
 function bindSettings(view: HTMLElement): void {
   const on = (id: string, f: () => void) => { const el = q<HTMLElement>('#' + id, view); if (el) el.onclick = f; };
   on('set-connect', () => $('connect').click());
+  qa<HTMLButtonElement>('[data-radiomode]', view).forEach(b => b.onclick = () => {
+    state.radioSource = b.dataset.radiomode as 'local' | 'remote';
+    try { localStorage.setItem('mayhem.radiomode', state.radioSource); } catch { }
+    refreshSettings();
+  });
+  const urlInput = q<HTMLInputElement>("#set-remoteurl", view);
+  if (urlInput) {
+    urlInput.oninput = () => {
+      state.remoteUrl = urlInput.value;
+      try { localStorage.setItem('mayhem.remoteurl', state.remoteUrl); } catch { }
+    };
+  }
   on('set-log', () => $('log-toggle').click());
   on('set-rds', () => { rdsWanted = !rdsWanted; if (!rdsWanted) lastRds = null; sendRds(); refreshSettings(); });
   on('set-hd', () => { hdWanted = !hdWanted; if (!hdWanted) lastHd = null; sendHd(); refreshSettings(); });
@@ -9664,6 +9677,7 @@ async function connect(dev?: USBDevice): Promise<void> {
     btn.textContent = 'DISCONNECT';
     hideHint();                     // claimed — any "device busy / not found" hint is now stale
     await r.run();
+  }
   } catch (e) {
     const err = e as Error;
     log(`connect failed: ${err.message}`);
@@ -9675,6 +9689,44 @@ async function connect(dev?: USBDevice): Promise<void> {
     setStatus(state.board ? `${state.board} disconnected` : 'disconnected', false);
     radio = null; radioDev = null;
     refreshLauncherLimits();
+  }
+}
+
+/** Connect to a remote HackRF via WebSocket. */
+async function connectRemote(): Promise<void> {
+  const btn = $<HTMLButtonElement>('connect');
+  const url = state.remoteUrl.trim();
+  if (!url) { setStatus('Remote URL not configured', false); return; }
+  // Validate URL scheme
+  if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
+    setStatus('URL must start with ws:// or wss://', false);
+    return;
+  }
+  await ensureAudio();
+  const w = ensureWorker();
+  const r = new RemoteHackRF(url);
+  const events = {
+    onIq: (buf: Int8Array) => w.postMessage({ type: 'iq', buf: buf.buffer }, [buf.buffer]),
+    onLog: log,
+    onStatus: (s: string) => setStatus(s, true),
+  };
+  r.setEvents(events);
+  r.targetFreqHz = state.freq;
+  r.targetRateHz = state.rate;
+  r.setGain(state.lna, state.vga, state.amp);
+  try {
+    await r.open();
+    radio = r;
+    state.board = 'Remote'; state.firmware = 'WebSocket';
+    refreshLauncherLimits();
+    applyLauncherView();
+    btn.textContent = 'DISCONNECT';
+    setStatus('Remote HackRF connected', true);
+    await r.run();
+  } catch (e) {
+    const err = e as Error;
+    log(`connectRemote failed: ${err.message}`);
+    setStatus(`Remote connection failed: ${err.message}`, false);
   }
 }
 

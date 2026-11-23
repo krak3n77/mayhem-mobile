@@ -25,3 +25,4 @@ keystore.properties
 web/test/
 app/src/test/
 web/replay_tmp/
+server/__pycache__/server.cpython-314.pyc
