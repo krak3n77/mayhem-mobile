@@ -9698,8 +9698,8 @@ async function connectRemote(): Promise<void> {
   const url = state.remoteUrl.trim();
   if (!url) { setStatus('Remote URL not configured', false); return; }
   // Validate URL scheme
-  if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
-    setStatus('URL must start with ws:// or wss://', false);
+  if (!url.startsWith('wss://')) {
+    setStatus('URL must start with wss://', false);
     return;
   }
   await ensureAudio();
