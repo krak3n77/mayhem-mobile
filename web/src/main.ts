@@ -9623,6 +9623,11 @@ async function connect(dev?: USBDevice): Promise<void> {
   // `radio` out from under the winner: the dongle kept streaming but no app could retune it any more, so every
   // decoder went deaf until you reconnected.
   if (connecting) return;
+  // Branch based on radio source mode
+  if (state.radioSource === "remote") {
+    await connectRemote();
+    return;
+  }
   connecting = true;
   hideHint();                       // a fresh attempt clears a stale hint from the last one
   try {
